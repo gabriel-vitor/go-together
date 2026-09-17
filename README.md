@@ -44,6 +44,48 @@ cliente passageiro ─┘    servidor central   └── Persistência JSON (sn
 - **Persistência:** snapshot JSON gravado de forma atômica (arquivo
   temporário + rename) após cada mutação; recarregado no boot do servidor.
 
+## Estrutura de diretórios
+
+```
+go-together/
+├── comum/                      # pacote compartilhado por servidor e clientes
+│   └── protocolo.py            #   enquadramento (4 bytes + JSON UTF-8) e validação
+├── servidor/                   # pacote do servidor central
+│   ├── servidor.py             #   socket TCP, um thread por cliente, despacho das operações
+│   ├── estado.py               #   estado em memória, travas, reserva atômica, persistência
+│   └── itinerarios.py          #   busca de itinerários (DFS combinando caronas)
+├── cliente/                    # pacote dos clientes de terminal
+│   ├── comum.py                #   conexão, requisições e fluxo de login (comum aos dois)
+│   ├── motorista.py            #   cliente do motorista
+│   └── passageiro.py           #   cliente do passageiro
+├── testes/                     # pacote de testes automatizados
+│   └── teste_concorrencia.py   #   concorrência, atomicidade, deadlock e desempenho
+├── docs/
+│   ├── PROTOCOLO.md            # especificação completa do protocolo de aplicação
+│   └── TUTORIAL.md             # passo a passo de execução e roteiro de demonstração
+├── dados/                      # criado em runtime: estado.json (persistência; fora do git)
+├── Dockerfile                  # imagem única para todos os componentes
+├── docker-compose.yml          # serviços: servidor, motorista, passageiro, teste
+└── README.md
+```
+
+## Pacotes e dependências
+
+O projeto usa **exclusivamente a biblioteca padrão do Python** — não há
+`requirements.txt` nem `pip install`. Módulos utilizados e seus papéis:
+
+| Módulo (stdlib) | Uso no projeto |
+|---|---|
+| `socket` | Comunicação TCP nativa (servidor e clientes) |
+| `struct` | Empacotamento do cabeçalho de 4 bytes em big-endian |
+| `json` | Representação intermediária das mensagens e persistência |
+| `threading` | Um thread por cliente; `Lock`/`RLock` para o controle de concorrência; `Barrier` nos testes |
+| `hashlib` | Hash SHA-256 das senhas |
+| `uuid` | Geração de ids de caronas e reservas |
+| `datetime` | Validação de datas e horas |
+| `os` | Escrita atômica da persistência (`os.replace`) e variáveis de ambiente |
+| `statistics`, `time` | Medições de latência no teste de carga |
+
 ## Como executar
 
 Requisitos: Python 3.10+ (somente biblioteca padrão) ou Docker.
@@ -92,6 +134,61 @@ VAIJUNTO_HOST=IP_DO_SERVIDOR docker compose run --rm passageiro
 ```
 
 ou, sem Docker: `python -m cliente.passageiro IP_DO_SERVIDOR 5000`.
+
+## Como usar
+
+Os dois clientes são interativos, guiados por menus numerados. Em ambos, o
+primeiro passo é o acesso: `2` para registrar um novo usuário (nome + senha)
+ou `1` para entrar com um usuário existente. A sessão dura enquanto a
+conexão estiver aberta; `0` sai.
+
+### Cliente motorista
+
+```
+=== VAIJUNTO - Motorista ===
+1. Publicar carona
+2. Minhas caronas (passageiros por trecho)
+3. Cancelar carona
+0. Sair
+```
+
+- **Publicar carona (1):** informe a rota como cidades separadas por vírgula
+  e **na ordem do percurso** (ex.: `Salvador, Feira de Santana, Vitória da
+  Conquista`), a data (`AAAA-MM-DD`), a hora (`HH:MM`), o número de assentos
+  e o preço por trecho — um valor para cada trecho separado por vírgula
+  (ex.: `40, 80`) ou um único valor aplicado a todos. O sistema responde com
+  o id da carona.
+- **Minhas caronas (2):** lista cada carona com seus trechos, mostrando por
+  trecho o preço, os assentos livres e os passageiros confirmados.
+- **Cancelar carona (3):** informe o id; as reservas de passageiros que
+  usavam a carona são desfeitas por inteiro (e avisadas via status
+  `cancelada_pelo_motorista` na consulta deles).
+
+### Cliente passageiro
+
+```
+=== VAIJUNTO - Passageiro ===
+1. Buscar itinerários
+2. Reservar itinerário da última busca
+3. Minhas reservas
+4. Cancelar reserva
+0. Sair
+```
+
+- **Buscar (1):** informe origem, destino e data. O sistema lista até 10
+  itinerários do mais barato ao mais caro, cada um com suas pernas
+  (motorista, horário, preço e assentos) — inclusive combinações de caronas
+  de motoristas diferentes com baldeação.
+- **Reservar (2):** escolha o número de um itinerário da última busca. A
+  confirmação é atômica: todas as pernas ou nenhuma. Se outro passageiro
+  confirmou antes e esgotou um trecho, o sistema recusa com o motivo —
+  basta buscar novamente e escolher outra opção.
+- **Minhas reservas (3):** lista id, data, status e pernas de cada reserva.
+- **Cancelar reserva (4):** informe o id; os assentos de todas as pernas são
+  liberados imediatamente.
+
+Um roteiro de demonstração completo, com valores de exemplo, está em
+[docs/TUTORIAL.md](docs/TUTORIAL.md).
 
 ## Teste de concorrência
 

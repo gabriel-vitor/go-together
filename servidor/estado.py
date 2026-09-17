@@ -17,8 +17,8 @@ Modelo de dados
   TRECHO: `ocupados[k]` conta os assentos tomados no trecho k. Um passageiro
   que viaja da cidade i à cidade j ocupa 1 assento em cada trecho k com
   i <= k < j — e apenas nesses; o assento volta a estar livre nos demais.
-* Reserva: um itinerário confirmado, composto por 1..4 "pernas", cada perna
-  sendo um sub-percurso contíguo de UMA carona. Pernas de caronas de
+* Reserva: um itinerário confirmado, composto por 1..4 "etapas", cada etapa
+  sendo um sub-percurso contíguo de UMA carona. Etapas de caronas de
   motoristas diferentes podem compor a mesma reserva.
 
 Controle de concorrência
@@ -49,7 +49,7 @@ from datetime import datetime
 # Limites de sanidade nas entradas (defesa contra clientes defeituosos).
 MAX_CIDADES_ROTA = 20
 MAX_ASSENTOS = 50
-MAX_PERNAS_RESERVA = 4
+MAX_ETAPAS_RESERVA = 4
 
 
 class ErroNegocio(Exception):
@@ -212,15 +212,15 @@ class Estado:
             with self.travas_caronas[carona["id"]]:
                 visao = self._visao_carona(carona)
                 # Para cada trecho, lista quem o ocupa (derivado das reservas
-                # confirmadas cujas pernas cobrem o trecho k desta carona).
+                # confirmadas cujas etapas cobrem o trecho k desta carona).
                 for k, trecho in enumerate(visao["trechos"]):
                     trecho["passageiros"] = sorted(
                         r["passageiro"]
                         for r in reservas
                         if r["status"] == "confirmada"
-                        for perna in r["pernas"]
-                        if perna["carona_id"] == carona["id"]
-                        and perna["idx_origem"] <= k < perna["idx_destino"]
+                        for etapa in r["etapas"]
+                        if etapa["carona_id"] == carona["id"]
+                        and etapa["idx_origem"] <= k < etapa["idx_destino"]
                     )
             visoes.append(visao)
         return visoes
@@ -233,7 +233,7 @@ class Estado:
              nenhuma nova reserva a aceita;
           2. cancela cada reserva afetada por inteiro (os assentos das outras
              caronas do itinerário também são liberados, pois o itinerário é
-             atômico: sem uma perna, as demais perdem o sentido).
+             atômico: sem uma etapa, as demais perdem o sentido).
         """
         carona_id = _exigir_texto(carona_id, "carona_id", 40)
         with self.trava_global:
@@ -254,7 +254,7 @@ class Estado:
             afetadas = [
                 r for r in self.reservas.values()
                 if r["status"] == "confirmada"
-                and any(p["carona_id"] == carona_id for p in r["pernas"])
+                and any(p["carona_id"] == carona_id for p in r["etapas"])
             ]
         for reserva in afetadas:
             self._desfazer_reserva(reserva, novo_status="cancelada_pelo_motorista")
@@ -265,8 +265,8 @@ class Estado:
     # ------------------------------------------------------------------
     # Reservas (lado passageiro)
     # ------------------------------------------------------------------
-    def reservar(self, passageiro, pernas) -> dict:
-        """Confirma atomicamente um itinerário com uma ou mais pernas.
+    def reservar(self, passageiro, etapas) -> dict:
+        """Confirma atomicamente um itinerário com uma ou mais etapas.
 
         Fase 1 (sem travas de carona): valida a estrutura do pedido, resolve
         as caronas e calcula quantos assentos serão necessários em cada
@@ -275,15 +275,15 @@ class Estado:
         re-verifica TODA a disponibilidade e só então grava. Qualquer falha
         aborta antes da primeira escrita — tudo ou nada.
         """
-        if not isinstance(pernas, list) or not (1 <= len(pernas) <= MAX_PERNAS_RESERVA):
-            raise ErroNegocio(f"pernas deve ser uma lista de 1 a {MAX_PERNAS_RESERVA} itens")
+        if not isinstance(etapas, list) or not (1 <= len(etapas) <= MAX_ETAPAS_RESERVA):
+            raise ErroNegocio(f"etapas deve ser uma lista de 1 a {MAX_ETAPAS_RESERVA} itens")
 
         # --- Fase 1: resolução e validação ---
         with self.trava_global:
             caronas = {}
-            for p in pernas:
+            for p in etapas:
                 if not isinstance(p, dict):
-                    raise ErroNegocio("cada perna deve ser um objeto")
+                    raise ErroNegocio("cada etapa deve ser um objeto")
                 cid = _exigir_texto(p.get("carona_id"), "carona_id", 40)
                 carona = self.caronas.get(cid)
                 if carona is None:
@@ -291,9 +291,9 @@ class Estado:
                 caronas[cid] = carona
 
         demanda: dict[tuple[str, int], int] = {}  # (carona_id, trecho) -> qtd
-        pernas_resolvidas = []
+        etapas_resolvidas = []
         datas = set()
-        for p in pernas:
+        for p in etapas:
             cid = p["carona_id"].strip()
             carona = caronas[cid]
             origem = _exigir_texto(p.get("origem"), "origem", 60)
@@ -312,7 +312,7 @@ class Estado:
                 demanda[(cid, k)] = demanda.get((cid, k), 0) + 1
             preco = round(sum(carona["precos"][idx_o:idx_d]), 2)
             datas.add(carona["data"])
-            pernas_resolvidas.append({
+            etapas_resolvidas.append({
                 "carona_id": cid,
                 "motorista": carona["motorista"],
                 "origem": carona["rota"][idx_o],
@@ -324,14 +324,14 @@ class Estado:
                 "preco": preco,
             })
 
-        # O itinerário deve ser contíguo: o destino de uma perna é a origem
-        # da seguinte, e todas as pernas na mesma data.
-        for anterior, seguinte in zip(pernas_resolvidas, pernas_resolvidas[1:]):
+        # O itinerário deve ser contíguo: o destino de uma etapa é a origem
+        # da seguinte, e todas as etapas na mesma data.
+        for anterior, seguinte in zip(etapas_resolvidas, etapas_resolvidas[1:]):
             if anterior["destino"].casefold() != seguinte["origem"].casefold():
                 raise ErroNegocio(
-                    "itinerário descontínuo: o destino de uma perna deve ser a origem da próxima")
+                    "itinerário descontínuo: o destino de uma etapa deve ser a origem da próxima")
         if len(datas) != 1:
-            raise ErroNegocio("todas as pernas do itinerário devem ser na mesma data")
+            raise ErroNegocio("todas as etapas do itinerário devem ser na mesma data")
 
         # --- Fase 2: seção crítica com travas em ordem global ---
         with self._travar_caronas(list(caronas)):
@@ -353,9 +353,9 @@ class Estado:
                 "passageiro": passageiro,
                 "status": "confirmada",
                 "criada_em": _agora(),
-                "data": pernas_resolvidas[0]["data"],
-                "pernas": pernas_resolvidas,
-                "preco_total": round(sum(p["preco"] for p in pernas_resolvidas), 2),
+                "data": etapas_resolvidas[0]["data"],
+                "etapas": etapas_resolvidas,
+                "preco_total": round(sum(p["preco"] for p in etapas_resolvidas), 2),
             }
             with self.trava_global:
                 self.reservas[reserva["id"]] = reserva
@@ -381,22 +381,22 @@ class Estado:
         return {"reserva_id": reserva_id, "status": "cancelada"}
 
     def _desfazer_reserva(self, reserva: dict, novo_status: str) -> None:
-        """Libera os assentos de todas as pernas da reserva e muda o status.
+        """Libera os assentos de todas as etapas da reserva e muda o status.
 
         Usa o mesmo travamento ordenado da confirmação; a checagem do status
         dentro da seção crítica evita liberação dupla se dois cancelamentos
         concorrerem sobre a mesma reserva.
         """
-        ids = [p["carona_id"] for p in reserva["pernas"]]
+        ids = [p["carona_id"] for p in reserva["etapas"]]
         with self._travar_caronas(ids):
             if reserva["status"] != "confirmada":
                 return  # outro thread já desfez esta reserva
             reserva["status"] = novo_status
             with self.trava_global:
                 caronas = {i: self.caronas[i] for i in ids}
-            for perna in reserva["pernas"]:
-                carona = caronas[perna["carona_id"]]
-                for k in range(perna["idx_origem"], perna["idx_destino"]):
+            for etapa in reserva["etapas"]:
+                carona = caronas[etapa["carona_id"]]
+                for k in range(etapa["idx_origem"], etapa["idx_destino"]):
                     carona["ocupados"][k] -= 1
 
     # ------------------------------------------------------------------

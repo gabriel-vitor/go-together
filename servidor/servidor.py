@@ -153,7 +153,7 @@ class Servidor:
             snapshot = estado.snapshot_caronas(msg.get("data"))
             return itinerarios.buscar(snapshot, origem, destino)
         if op == "reservar":
-            return estado.reservar(usuario, msg.get("pernas"))
+            return estado.reservar(usuario, msg.get("etapas"))
         if op == "minhas_reservas":
             return estado.minhas_reservas(usuario)
         if op == "cancelar_reserva":

@@ -77,7 +77,7 @@ def publicar_carona(conexao: Conexao, rota: list[str], assentos: int) -> str:
     return carona["id"]
 
 
-def disparar_passageiros(n: int, fabrica_pernas, prefixo: str):
+def disparar_passageiros(n: int, fabrica_etapas, prefixo: str):
     """Cria `n` passageiros, cada um em um thread com sua própria conexão,
     todos liberados AO MESMO TEMPO por uma barreira, para maximizar a
     sobreposição real das requisições de reserva.
@@ -93,11 +93,11 @@ def disparar_passageiros(n: int, fabrica_pernas, prefixo: str):
     def passageiro(indice: int):
         try:
             conexao = nova_conexao_logada(f"{prefixo}-{RODADA}-{indice}")
-            pernas = fabrica_pernas(indice)
+            etapas = fabrica_etapas(indice)
             barreira.wait()  # todos disparam juntos
             inicio = time.perf_counter()
             try:
-                conexao.pedir("reservar", pernas=pernas)
+                conexao.pedir("reservar", etapas=etapas)
                 ok = True
             except ErroServidor:
                 ok = False  # esgotado: resultado esperado para os perdedores
@@ -147,10 +147,10 @@ def cenario_1() -> None:
     motorista = nova_conexao_logada(f"mot1-{RODADA}")
     carona_id = publicar_carona(motorista, [cidade("Salvador"), cidade("Feira")], assentos=5)
 
-    def pernas(_i):
+    def etapas(_i):
         return [{"carona_id": carona_id, "origem": cidade("Salvador"), "destino": cidade("Feira")}]
 
-    sucessos, latencias, erros = disparar_passageiros(30, pernas, "pas1")
+    sucessos, latencias, erros = disparar_passageiros(30, etapas, "pas1")
     relatar_latencias("reservar", latencias)
     checar(not erros, f"nenhum erro inesperado {erros or ''}")
     checar(sucessos == 5, f"exatamente 5 reservas confirmadas (obtido: {sucessos})")
@@ -166,13 +166,13 @@ def cenario_2() -> None:
     carona_a = publicar_carona(motorista, [cidade("X"), cidade("Y")], assentos=20)
     carona_b = publicar_carona(motorista, [cidade("Y"), cidade("Z")], assentos=1)
 
-    def pernas(_i):
+    def etapas(_i):
         return [
             {"carona_id": carona_a, "origem": cidade("X"), "destino": cidade("Y")},
             {"carona_id": carona_b, "origem": cidade("Y"), "destino": cidade("Z")},
         ]
 
-    sucessos, latencias, erros = disparar_passageiros(20, pernas, "pas2")
+    sucessos, latencias, erros = disparar_passageiros(20, etapas, "pas2")
     relatar_latencias("reservar", latencias)
     checar(not erros, f"nenhum erro inesperado {erros or ''}")
     checar(sucessos == 1, f"exatamente 1 itinerário confirmado (obtido: {sucessos})")
@@ -192,7 +192,7 @@ def cenario_3() -> None:
     carona_a = publicar_carona(motorista, [cidade("P"), cidade("Q"), cidade("R")], assentos=15)
     carona_b = publicar_carona(motorista, [cidade("R"), cidade("Q"), cidade("P")], assentos=15)
 
-    def pernas(indice):
+    def etapas(indice):
         if indice % 2 == 0:  # P -> Q na carona A, depois Q -> P na carona B
             return [
                 {"carona_id": carona_a, "origem": cidade("P"), "destino": cidade("Q")},
@@ -203,7 +203,7 @@ def cenario_3() -> None:
             {"carona_id": carona_a, "origem": cidade("Q"), "destino": cidade("R")},
         ]
 
-    sucessos, latencias, erros = disparar_passageiros(40, pernas, "pas3")
+    sucessos, latencias, erros = disparar_passageiros(40, etapas, "pas3")
     relatar_latencias("reservar", latencias)
     checar(not erros, f"todas as requisições terminaram — sem deadlock {erros or ''}")
     # Cada itinerário par usa trecho 0 de A; cada ímpar usa trecho 1 de A.

@@ -150,7 +150,7 @@ Com o servidor no ar e dois terminais de cliente abertos:
    mais barato ao mais caro — inclusive combinações de caronas de
    motoristas diferentes, quando existirem.
 6. `2` (Reservar): escolha o número do itinerário. A confirmação é
-   **atômica**: todas as pernas ou nenhuma.
+   **atômica**: todas as etapas ou nenhuma.
 7. `3` (Minhas reservas): confira id, status e preço total.
 
 **De volta ao motorista:**

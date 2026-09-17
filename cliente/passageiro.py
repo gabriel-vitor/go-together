@@ -14,12 +14,12 @@ from cliente.comum import Conexao, ErroServidor, autenticar, endereco_servidor
 def _mostrar_itinerarios(itinerarios: list[dict]) -> None:
     for n, itinerario in enumerate(itinerarios, start=1):
         print(f"\n{n}. R$ {itinerario['preco_total']:.2f} "
-              f"({itinerario['num_pernas']} perna(s))")
-        for perna in itinerario["pernas"]:
-            print(f"     {perna['origem']} -> {perna['destino']} | "
-                  f"{perna['data']} {perna['hora']} | motorista: {perna['motorista']} | "
-                  f"R$ {perna['preco']:.2f} | assentos: {perna['assentos_disponiveis']} | "
-                  f"carona {perna['carona_id']}")
+              f"({itinerario['num_etapas']} etapa(s))")
+        for etapa in itinerario["etapas"]:
+            print(f"     {etapa['origem']} -> {etapa['destino']} | "
+                  f"{etapa['data']} {etapa['hora']} | motorista: {etapa['motorista']} | "
+                  f"R$ {etapa['preco']:.2f} | assentos: {etapa['assentos_disponiveis']} | "
+                  f"carona {etapa['carona_id']}")
 
 
 def buscar(conexao: Conexao, cache: dict) -> None:
@@ -49,13 +49,13 @@ def reservar(conexao: Conexao, cache: dict) -> None:
     if not escolha.isdigit() or not (1 <= int(escolha) <= len(itinerarios)):
         return
     itinerario = itinerarios[int(escolha) - 1]
-    # A reserva envia apenas o essencial de cada perna; o servidor
+    # A reserva envia apenas o essencial de cada etapa; o servidor
     # re-valida tudo (preço, índices, disponibilidade) sob as travas.
-    pernas = [
+    etapas = [
         {"carona_id": p["carona_id"], "origem": p["origem"], "destino": p["destino"]}
-        for p in itinerario["pernas"]
+        for p in itinerario["etapas"]
     ]
-    reserva = conexao.pedir("reservar", pernas=pernas)
+    reserva = conexao.pedir("reservar", etapas=etapas)
     print(f"\nReserva CONFIRMADA! id: {reserva['id']} | total R$ {reserva['preco_total']:.2f}")
 
 
@@ -67,9 +67,9 @@ def minhas_reservas(conexao: Conexao) -> None:
     for reserva in reservas:
         print(f"\n[{reserva['id']}] {reserva['data']} | {reserva['status']} | "
               f"R$ {reserva['preco_total']:.2f}")
-        for perna in reserva["pernas"]:
-            print(f"     {perna['origem']} -> {perna['destino']} | {perna['hora']} | "
-                  f"motorista: {perna['motorista']} | carona {perna['carona_id']}")
+        for etapa in reserva["etapas"]:
+            print(f"     {etapa['origem']} -> {etapa['destino']} | {etapa['hora']} | "
+                  f"motorista: {etapa['motorista']} | carona {etapa['carona_id']}")
 
 
 def cancelar(conexao: Conexao) -> None:

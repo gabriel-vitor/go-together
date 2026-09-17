@@ -176,15 +176,15 @@ conexão estiver aberta; `0` sai.
 ```
 
 - **Buscar (1):** informe origem, destino e data. O sistema lista até 10
-  itinerários do mais barato ao mais caro, cada um com suas pernas
+  itinerários do mais barato ao mais caro, cada um com suas etapas
   (motorista, horário, preço e assentos) — inclusive combinações de caronas
   de motoristas diferentes com baldeação.
 - **Reservar (2):** escolha o número de um itinerário da última busca. A
-  confirmação é atômica: todas as pernas ou nenhuma. Se outro passageiro
+  confirmação é atômica: todas as etapas ou nenhuma. Se outro passageiro
   confirmou antes e esgotou um trecho, o sistema recusa com o motivo —
   basta buscar novamente e escolher outra opção.
-- **Minhas reservas (3):** lista id, data, status e pernas de cada reserva.
-- **Cancelar reserva (4):** informe o id; os assentos de todas as pernas são
+- **Minhas reservas (3):** lista id, data, status e etapas de cada reserva.
+- **Cancelar reserva (4):** informe o id; os assentos de todas as etapas são
   liberados imediatamente.
 
 Um roteiro de demonstração completo, com valores de exemplo, está em

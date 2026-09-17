@@ -181,7 +181,7 @@ status `cancelada_pelo_motorista`. Somente o motorista dono pode cancelar.
 
 ```json
 {"status": "ok", "op": "buscar_itinerarios", "dados": [
-  {"preco_total": 95.0, "num_pernas": 2, "pernas": [
+  {"preco_total": 95.0, "num_etapas": 2, "etapas": [
      {"carona_id": "car-1a2b3c4d5e", "motorista": "joao",
       "origem": "Salvador", "destino": "Feira de Santana",
       "data": "2026-09-25", "hora": "08:00", "preco": 40.0,
@@ -193,8 +193,8 @@ status `cancelada_pelo_motorista`. Somente o motorista dono pode cancelar.
 ]}
 ```
 
-Itinerários podem combinar até **3 pernas** de caronas (e motoristas)
-diferentes. Resultados ordenados por preço total, número de pernas e hora de
+Itinerários podem combinar até **3 etapas** de caronas (e motoristas)
+diferentes. Resultados ordenados por preço total, número de etapas e hora de
 partida; no máximo 10 opções. A busca é **consultiva**: a disponibilidade só
 é garantida na confirmação (`reservar`).
 
@@ -202,14 +202,14 @@ partida; no máximo 10 opções. A busca é **consultiva**: a disponibilidade s�
 
 | Campo  | Tipo         | Regras                                             |
 |--------|--------------|----------------------------------------------------|
-| pernas | lista[objeto]| 1–4 pernas; cada uma com `carona_id`, `origem`, `destino` |
+| etapas | lista[objeto]| 1–4 etapas; cada uma com `carona_id`, `origem`, `destino` |
 
-O itinerário deve ser contíguo (destino de uma perna = origem da seguinte) e
-com todas as pernas na mesma data. A confirmação é **atômica**: ou todas as
-pernas são reservadas, ou nenhuma.
+O itinerário deve ser contíguo (destino de uma etapa = origem da seguinte) e
+com todas as etapas na mesma data. A confirmação é **atômica**: ou todas as
+etapas são reservadas, ou nenhuma.
 
 ```json
-{"op": "reservar", "pernas": [
+{"op": "reservar", "etapas": [
   {"carona_id": "car-1a2b3c4d5e", "origem": "Salvador", "destino": "Feira de Santana"},
   {"carona_id": "car-9f8e7d6c5b", "origem": "Feira de Santana", "destino": "Vitória da Conquista"}]}
 ```
@@ -218,7 +218,7 @@ pernas são reservadas, ou nenhuma.
 {"status": "ok", "op": "reservar", "dados": {
   "id": "res-0a1b2c3d4e", "passageiro": "ana", "status": "confirmada",
   "criada_em": "2026-09-17T14:03:22", "data": "2026-09-25",
-  "preco_total": 95.0, "pernas": [ ... ]}}
+  "preco_total": 95.0, "etapas": [ ... ]}}
 ```
 
 Erro típico quando outro passageiro confirmou antes (o primeiro a confirmar
@@ -233,7 +233,7 @@ mantém a preferência):
 
 Requisição: `{"op": "minhas_reservas"}`. Resposta: lista de reservas do
 usuário (mais recentes primeiro), cada uma com `status`
-(`confirmada`, `cancelada` ou `cancelada_pelo_motorista`), pernas e preço.
+(`confirmada`, `cancelada` ou `cancelada_pelo_motorista`), etapas e preço.
 
 ### 6.10 `cancelar_reserva` (passageiro)
 
@@ -243,7 +243,7 @@ usuário (mais recentes primeiro), cada uma com `status`
  "dados": {"reserva_id": "res-0a1b2c3d4e", "status": "cancelada"}}
 ```
 
-Libera os assentos de todas as pernas. Apenas o dono da reserva pode cancelar.
+Libera os assentos de todas as etapas. Apenas o dono da reserva pode cancelar.
 
 ## 7. Sincronização e regras de consistência
 

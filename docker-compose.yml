@@ -1,0 +1,52 @@
+# Orquestração local do VAIJUNTO.
+#
+# Serviços:
+#   servidor    - sobe por padrão (docker compose up servidor)
+#   motorista   - cliente interativo   (docker compose run --rm motorista)
+#   passageiro  - cliente interativo   (docker compose run --rm passageiro)
+#   teste       - teste de concorrência (docker compose run --rm teste)
+#
+# Na MESMA máquina, os clientes alcançam o servidor pelo nome do serviço
+# ("servidor"), resolvido pelo DNS interno da rede do Compose.
+#
+# Em MÁQUINAS DISTINTAS (cenário do laboratório): o servidor publica a porta
+# 5000 no host ("ports"), ficando acessível pelo IP da máquina na rede local.
+# Nos clientes das outras máquinas, aponte VAIJUNTO_HOST para esse IP:
+#   VAIJUNTO_HOST=10.0.0.42 docker compose run --rm passageiro
+
+services:
+  servidor:
+    build: .
+    ports:
+      - "5000:5000"          # publica no host -> alcançável por outras máquinas
+    volumes:
+      - ./dados:/app/dados   # persiste o estado (JSON) fora do contêiner
+    restart: unless-stopped
+
+  motorista:
+    build: .
+    command: python -m cliente.motorista
+    environment:
+      VAIJUNTO_HOST: ${VAIJUNTO_HOST:-servidor}
+      VAIJUNTO_PORTA: "5000"
+    stdin_open: true          # cliente interativo de terminal
+    tty: true
+    profiles: ["clientes"]    # não sobe junto com "up"; use docker compose run
+
+  passageiro:
+    build: .
+    command: python -m cliente.passageiro
+    environment:
+      VAIJUNTO_HOST: ${VAIJUNTO_HOST:-servidor}
+      VAIJUNTO_PORTA: "5000"
+    stdin_open: true
+    tty: true
+    profiles: ["clientes"]
+
+  teste:
+    build: .
+    command: python -m testes.teste_concorrencia
+    environment:
+      VAIJUNTO_HOST: ${VAIJUNTO_HOST:-servidor}
+      VAIJUNTO_PORTA: "5000"
+    profiles: ["teste"]

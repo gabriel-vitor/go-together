@@ -47,6 +47,9 @@ cliente passageiro ─┘    servidor central   └── Persistência JSON (sn
 ## Como executar
 
 Requisitos: Python 3.10+ (somente biblioteca padrão) ou Docker.
+Passo a passo detalhado — incluindo o cenário multi-máquina do laboratório,
+um roteiro de demonstração fim a fim e solução de problemas — em
+[docs/TUTORIAL.md](docs/TUTORIAL.md).
 
 ### Local (sem Docker)
 

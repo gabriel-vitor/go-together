@@ -110,17 +110,33 @@ Como o Compose publica a porta com `ports: "5000:5000"`, o Docker faz o
 encaminhamento host→contêiner: qualquer máquina da rede alcança o servidor
 via `IP_DO_HOST:5000`, sem redes overlay ou configuração adicional.
 
-**Nas máquinas dos clientes** (substitua pelo IP anotado):
+**Nas máquinas dos clientes** (substitua pelo IP anotado). A sintaxe de
+variável de ambiente depende do terminal:
+
+Linux/macOS (bash):
 
 ```bash
 VAIJUNTO_HOST=10.0.0.42 docker compose run --rm passageiro
 ```
 
+Windows (cmd):
+
 ```bash
-VAIJUNTO_HOST=10.0.0.42 docker compose run --rm motorista
+set VAIJUNTO_HOST=10.0.0.42 && docker compose run --rm passageiro
 ```
 
-Ou, sem Docker: `python -m cliente.passageiro 10.0.0.42 5000`.
+Windows (PowerShell):
+
+```bash
+$env:VAIJUNTO_HOST = "10.0.0.42"; docker compose run --rm passageiro
+```
+
+Ou, sem Docker e sem variável de ambiente (funciona igual em qualquer
+terminal, pois host e porta vão como argumentos):
+
+```bash
+python -m cliente.passageiro 10.0.0.42 5000
+```
 
 **Se a conexão for recusada:** verifique se o firewall da máquina do
 servidor permite entrada na porta TCP 5000 e se as máquinas estão na mesma

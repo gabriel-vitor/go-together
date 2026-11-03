@@ -127,13 +127,23 @@ docker compose run --rm passageiro
 
 Na máquina do servidor, `docker compose up servidor` publica a porta 5000 no
 host (`ports: "5000:5000"`), tornando o serviço alcançável pelo IP da máquina
-na rede local. Nas máquinas dos clientes, basta apontar para esse IP:
+na rede local. Nas máquinas dos clientes, basta apontar para esse IP —
+a sintaxe da variável de ambiente depende do terminal:
 
 ```bash
-VAIJUNTO_HOST=IP_DO_SERVIDOR docker compose run --rm passageiro
+VAIJUNTO_HOST=IP_DO_SERVIDOR docker compose run --rm passageiro   # bash
 ```
 
-ou, sem Docker: `python -m cliente.passageiro IP_DO_SERVIDOR 5000`.
+```bash
+set VAIJUNTO_HOST=IP_DO_SERVIDOR && docker compose run --rm passageiro   # Windows cmd
+```
+
+```bash
+$env:VAIJUNTO_HOST = "IP_DO_SERVIDOR"; docker compose run --rm passageiro   # PowerShell
+```
+
+Ou, sem Docker e sem variável (host e porta como argumentos, igual em
+qualquer terminal): `python -m cliente.passageiro IP_DO_SERVIDOR 5000`.
 
 ## Como usar
 

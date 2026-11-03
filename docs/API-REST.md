@@ -12,7 +12,9 @@ servidor↔servidor.
 - **Por que REST:** exigência do problema — tráfego HTTP em porta conhecida
   atravessa os firewalls das empresas do consórcio.
 - **Porta padrão:** 8000 (configurável por `VAIJUNTO_PORTA_REST`).
-- **Framework:** Flask (permitido pelo enunciado). Os mecanismos de
+- **Framework:** FastAPI + uvicorn (permitidos pelo enunciado); handlers
+  síncronos executados em threadpool, mantendo o modelo de threads do
+  servidor. A documentação interativa gerada fica em `/docs`. Os mecanismos de
   coordenação — 2PC, exclusão mútua, wait-die, recuperação — são
   implementação própria (pacote [consorcio/](../consorcio/)).
 - **Relógio lógico:** toda requisição e resposta carrega o cabeçalho

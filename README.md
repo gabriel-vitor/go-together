@@ -44,7 +44,7 @@ clientes) acrescido de uma camada de consórcio:
 |---|---|
 | [servidor/](servidor/) | Servidor de empresa: TCP para clientes, estado em memória com travas por carona, holds/leases, persistência JSON atômica |
 | [consorcio/nucleo.py](consorcio/nucleo.py) | Coordenador 2PC, wait-die, varredor de leases/pendências, recuperação pós-queda |
-| [consorcio/rest_api.py](consorcio/rest_api.py) | API REST entre servidores (Flask) — espec. em [docs/API-REST.md](docs/API-REST.md) |
+| [consorcio/rest_api.py](consorcio/rest_api.py) | API REST entre servidores (FastAPI) — espec. em [docs/API-REST.md](docs/API-REST.md) |
 | [consorcio/lamport.py](consorcio/lamport.py) / [wal.py](consorcio/wal.py) / [pares.py](consorcio/pares.py) | Relógio lógico, write-ahead log e cliente HTTP com timeouts |
 | [cliente/](cliente/) | Clientes motorista e passageiro (reaproveitados do Problema 1; conectam só à própria empresa) |
 | [simulador/simulador.py](simulador/simulador.py) | Simulador de passageiros: carga autônoma de buscas/reservas pelas 3 empresas |
@@ -53,7 +53,7 @@ clientes) acrescido de uma camada de consórcio:
 | [docs/PROTOCOLO.md](docs/PROTOCOLO.md) | Protocolo TCP cliente↔servidor (Problema 1, ainda em uso) |
 | [docs/API-REST.md](docs/API-REST.md) | **Especificação da API REST** do consórcio, com diagrama de sequência do 2PC |
 
-**Dependências:** Python 3.10+; `flask` e `requests` (permitidos para a API
+**Dependências:** Python 3.10+; `fastapi`, `uvicorn` e `requests` (permitidos para a API
 REST — `pip install -r requirements.txt`). A coordenação distribuída é toda
 implementação própria, sem ZooKeeper/etcd/Redis/Consul/XA.
 
@@ -120,5 +120,7 @@ Simulador de carga:
 python -m simulador.simulador --tcp 127.0.0.1:5000 127.0.0.1:5001 127.0.0.1:5002 --passageiros 5 --duracao 30
 ```
 
-Medições em uma máquina (3 empresas em contêineres): ~213 operações/s,
-busca distribuída com média de 38 ms e reserva 2PC com média de 199 ms.
+Medições em uma máquina (3 empresas em contêineres, dados zerados,
+15 passageiros simultâneos): ~192 operações/s, busca distribuída com média
+de 13 ms e reserva 2PC com média de 355 ms (inclui as esperas do wait-die
+sob disputa; sem concorrência a reserva fica em ~165 ms).

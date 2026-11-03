@@ -193,11 +193,12 @@ def principal() -> None:
     servidor.consorcio = Consorcio(
         empresa, servidor.estado, mapa_de_pares_do_ambiente(), caminho_wal)
     api = criar_api(servidor.consorcio)
-    threading.Thread(
-        target=lambda: api.run(host=host, port=porta_rest, threaded=True,
-                               use_reloader=False),
-        daemon=True,
-    ).start()
+    # uvicorn fora do thread principal não instala handlers de sinal; os
+    # handlers síncronos da API rodam no threadpool do próprio uvicorn.
+    import uvicorn
+    servidor_rest = uvicorn.Server(uvicorn.Config(
+        api, host=host, port=porta_rest, log_level="warning"))
+    threading.Thread(target=servidor_rest.run, daemon=True).start()
     print(f"[servidor] empresa '{empresa}' | TCP {porta} | REST {porta_rest} | "
           f"pares: {sorted(servidor.consorcio.pares.mapa) or 'nenhum'}")
 

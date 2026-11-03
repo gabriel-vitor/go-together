@@ -42,6 +42,7 @@ import hashlib
 import json
 import os
 import threading
+import time
 import uuid
 from contextlib import contextmanager
 from datetime import datetime
@@ -50,6 +51,11 @@ from datetime import datetime
 MAX_CIDADES_ROTA = 20
 MAX_ASSENTOS = 50
 MAX_ETAPAS_RESERVA = 4
+
+# Problema 2: tempo de vida (lease) de uma reserva temporária (hold) criada
+# na fase PREPARE do 2PC. Se o coordenador sumir sem decidir, o hold expira
+# e os assentos voltam — nenhum assento fica bloqueado indefinidamente.
+LEASE_SEGUNDOS = int(os.environ.get("VAIJUNTO_LEASE", "30"))
 
 
 class ErroNegocio(Exception):
@@ -107,6 +113,14 @@ class Estado:
         self.caronas: dict[str, dict] = {}
         self.reservas: dict[str, dict] = {}
         self.travas_caronas: dict[str, threading.Lock] = {}
+        # Problema 2 — papel de PARTICIPANTE do 2PC:
+        # holds[tx] = reserva temporária (assentos retidos na fase PREPARE,
+        # aguardando COMMIT/ABORT do coordenador, com lease de expiração).
+        self.holds: dict[str, dict] = {}
+        # desfechos[tx] = resultado final de transações já resolvidas aqui
+        # ("efetivada"/"abortada" + reserva_id), para IDEMPOTÊNCIA: repetir
+        # um commit/abort devolve o mesmo resultado, nunca aplica duas vezes.
+        self.desfechos: dict[str, dict] = {}
         self._carregar()
 
     # ------------------------------------------------------------------
@@ -259,32 +273,39 @@ class Estado:
         for reserva in afetadas:
             self._desfazer_reserva(reserva, novo_status="cancelada_pelo_motorista")
 
+        # Problema 2: transações distribuídas afetadas (tx + coordenador),
+        # para o consórcio notificar os coordenadores — que cancelam o
+        # itinerário inteiro também nas demais empresas.
+        transacoes_afetadas = [
+            (r["tx"], r.get("coordenador"))
+            for r in afetadas if r.get("tx") and r.get("coordenador")
+        ]
         self._salvar()
-        return {"carona_id": carona_id, "reservas_canceladas": len(afetadas)}
+        return {"carona_id": carona_id, "reservas_canceladas": len(afetadas),
+                "transacoes_afetadas": transacoes_afetadas}
 
     # ------------------------------------------------------------------
     # Reservas (lado passageiro)
     # ------------------------------------------------------------------
-    def reservar(self, passageiro, etapas) -> dict:
-        """Confirma atomicamente um itinerário com uma ou mais etapas.
+    def _resolver_etapas(self, etapas, exigir_contiguidade: bool = True):
+        """Valida a estrutura das etapas e resolve-as contra as caronas LOCAIS.
 
-        Fase 1 (sem travas de carona): valida a estrutura do pedido, resolve
-        as caronas e calcula quantos assentos serão necessários em cada
-        trecho de cada carona (`demanda`).
-        Fase 2 (seção crítica): trava as caronas em ordem global de id,
-        re-verifica TODA a disponibilidade e só então grava. Qualquer falha
-        aborta antes da primeira escrita — tudo ou nada.
+        Devolve (caronas, demanda, etapas_resolvidas), onde `demanda` mapeia
+        (carona_id, trecho) -> assentos necessários. Não adquire travas de
+        carona: é a fase de validação, compartilhada entre a reserva local
+        (Problema 1) e o PREPARE do 2PC (Problema 2). No 2PC, um participante
+        recebe apenas as etapas SUAS, que podem não ser contíguas entre si
+        (a contiguidade do itinerário completo é verificada pelo coordenador).
         """
         if not isinstance(etapas, list) or not (1 <= len(etapas) <= MAX_ETAPAS_RESERVA):
             raise ErroNegocio(f"etapas deve ser uma lista de 1 a {MAX_ETAPAS_RESERVA} itens")
 
-        # --- Fase 1: resolução e validação ---
         with self.trava_global:
             caronas = {}
             for p in etapas:
                 if not isinstance(p, dict):
                     raise ErroNegocio("cada etapa deve ser um objeto")
-                cid = _exigir_texto(p.get("carona_id"), "carona_id", 40)
+                cid = _exigir_texto(p.get("carona_id"), "carona_id", 80)
                 carona = self.caronas.get(cid)
                 if carona is None:
                     raise ErroNegocio(f"carona '{cid}' não encontrada")
@@ -324,14 +345,26 @@ class Estado:
                 "preco": preco,
             })
 
-        # O itinerário deve ser contíguo: o destino de uma etapa é a origem
-        # da seguinte, e todas as etapas na mesma data.
-        for anterior, seguinte in zip(etapas_resolvidas, etapas_resolvidas[1:]):
-            if anterior["destino"].casefold() != seguinte["origem"].casefold():
-                raise ErroNegocio(
-                    "itinerário descontínuo: o destino de uma etapa deve ser a origem da próxima")
+        if exigir_contiguidade:
+            # O itinerário deve ser contíguo: o destino de uma etapa é a
+            # origem da seguinte, e todas as etapas na mesma data.
+            for anterior, seguinte in zip(etapas_resolvidas, etapas_resolvidas[1:]):
+                if anterior["destino"].casefold() != seguinte["origem"].casefold():
+                    raise ErroNegocio(
+                        "itinerário descontínuo: o destino de uma etapa deve ser a origem da próxima")
         if len(datas) != 1:
             raise ErroNegocio("todas as etapas do itinerário devem ser na mesma data")
+        return caronas, demanda, etapas_resolvidas
+
+    def reservar(self, passageiro, etapas) -> dict:
+        """Confirma atomicamente um itinerário LOCAL (caminho do Problema 1).
+
+        Fase 1 (sem travas de carona): valida e resolve via _resolver_etapas.
+        Fase 2 (seção crítica): trava as caronas em ordem global de id,
+        re-verifica TODA a disponibilidade e só então grava. Qualquer falha
+        aborta antes da primeira escrita — tudo ou nada.
+        """
+        caronas, demanda, etapas_resolvidas = self._resolver_etapas(etapas)
 
         # --- Fase 2: seção crítica com travas em ordem global ---
         with self._travar_caronas(list(caronas)):
@@ -400,6 +433,239 @@ class Estado:
                     carona["ocupados"][k] -= 1
 
     # ------------------------------------------------------------------
+    # Problema 2 — papel de PARTICIPANTE do 2PC (holds com lease)
+    # ------------------------------------------------------------------
+    # Princípio do DONO ÚNICO: cada carona pertence a UMA empresa, e só o
+    # servidor dela escreve em `ocupados[]` — sempre sob a trava local da
+    # carona. A exclusão mútua distribuída reduz-se, assim, à exclusão
+    # mútua local: não existe trava distribuída sobre o assento.
+    #
+    # PREPARE cria um "hold": os assentos são retidos (ocupados[] já é
+    # incrementado, impedindo venda dupla) mas a reserva ainda não existe.
+    # COMMIT converte o hold em reserva; ABORT (ou a expiração do lease)
+    # devolve os assentos. Tudo idempotente, chaveado pelo id da transação.
+
+    def preparar_hold(self, tx_id, etapas, chave, coordenador, passageiro) -> dict:
+        """Fase 1 do 2PC no participante: tenta reter os assentos pedidos.
+
+        `chave` = [relogio_lamport, empresa] da transação: a ordem TOTAL que
+        define a precedência entre transações concorrentes, independente dos
+        relógios físicos dos servidores.
+
+        Votos possíveis:
+          * "sim"     -> assentos retidos (hold criado, lease correndo);
+          * "nao"     -> indisponível em definitivo (reservas confirmadas);
+          * "aguarde" -> indisponível por holds de transações MAIS NOVAS
+                         (chave maior). Pelo esquema wait-die, a transação
+                         mais antiga espera e repete; a mais nova morre.
+                         Isso dá um critério de precedência determinístico
+                         e elimina deadlock distribuído.
+        """
+        tx_id = _exigir_texto(tx_id, "tx", 80)
+        if not (isinstance(chave, list) and len(chave) == 2):
+            raise ErroNegocio("chave de precedência inválida")
+
+        # Idempotência: PREPARE repetido devolve o resultado já conhecido.
+        with self.trava_global:
+            if tx_id in self.holds:
+                return {"voto": "sim", "etapas": self.holds[tx_id]["etapas"]}
+            desfecho = self.desfechos.get(tx_id)
+        if desfecho is not None:
+            if desfecho["resultado"] == "efetivada":
+                return {"voto": "sim", "etapas": desfecho.get("etapas", [])}
+            return {"voto": "nao", "motivo": "transação já abortada"}
+
+        caronas, demanda, etapas_resolvidas = self._resolver_etapas(
+            etapas, exigir_contiguidade=False)
+
+        with self._travar_caronas(list(caronas)):
+            for carona in caronas.values():
+                if carona["cancelada"]:
+                    return {"voto": "nao",
+                            "motivo": f"a carona {carona['id']} foi cancelada pelo motorista"}
+
+            # Verifica a disponibilidade de TODOS os trechos antes de reter
+            # qualquer assento (mesma disciplina tudo-ou-nada do Problema 1).
+            faltantes = []
+            for (cid, k), qtd in demanda.items():
+                carona = caronas[cid]
+                if carona["ocupados"][k] + qtd > carona["assentos"]:
+                    faltantes.append((cid, k, qtd))
+
+            if faltantes:
+                # Wait-die: se liberar os holds de transações MAIS NOVAS
+                # (chave maior) bastaria, a transação mais antiga AGUARDA;
+                # caso contrário o esgotamento é definitivo e o voto é não.
+                with self.trava_global:
+                    holds_ativos = list(self.holds.values())
+                for (cid, k, qtd) in faltantes:
+                    retidos_por_novas = 0
+                    for h in holds_ativos:
+                        if list(h["chave"]) > list(chave):
+                            retidos_por_novas += sum(
+                                q for (hc, hk), q in
+                                (((d[0], d[1]), d[2]) for d in h["demanda"])
+                                if hc == cid and hk == k)
+                    carona = caronas[cid]
+                    if carona["ocupados"][k] - retidos_por_novas + qtd > carona["assentos"]:
+                        return {"voto": "nao",
+                                "motivo": "assentos esgotados no trecho "
+                                          f"{carona['rota'][k]} -> {carona['rota'][k + 1]}"}
+                return {"voto": "aguarde"}
+
+            # Tudo disponível: retém os assentos e registra o hold.
+            for (cid, k), qtd in demanda.items():
+                caronas[cid]["ocupados"][k] += qtd
+            hold = {
+                "tx": tx_id,
+                "chave": list(chave),
+                "coordenador": coordenador,
+                "passageiro": passageiro,
+                # demanda serializada como listas (JSON não tem tuplas)
+                "demanda": [[cid, k, qtd] for (cid, k), qtd in demanda.items()],
+                "etapas": etapas_resolvidas,
+                "criado_em": _agora(),
+                "expira_em": time.time() + LEASE_SEGUNDOS,
+            }
+            with self.trava_global:
+                self.holds[tx_id] = hold
+        self._salvar()
+        return {"voto": "sim", "etapas": etapas_resolvidas}
+
+    def efetivar_hold(self, tx_id) -> dict | None:
+        """Fase 2 do 2PC (COMMIT): converte o hold em reserva confirmada.
+
+        Idempotente: repetir devolve a mesma reserva. Devolve None se a
+        transação é desconhecida ou o hold já expirou/abortou — o chamador
+        traduz isso em 410 (Gone) para o coordenador tratar.
+        """
+        with self.trava_global:
+            desfecho = self.desfechos.get(tx_id)
+            if desfecho is not None:
+                if desfecho["resultado"] == "efetivada":
+                    return self.reservas.get(desfecho["reserva_id"])
+                return None  # já abortada: tarde demais para efetivar
+            hold = self.holds.get(tx_id)
+        if hold is None:
+            return None
+
+        ids = sorted({d[0] for d in hold["demanda"]})
+        with self._travar_caronas(ids):
+            with self.trava_global:
+                if tx_id not in self.holds:  # corrida com expiração/abort
+                    desfecho = self.desfechos.get(tx_id)
+                    if desfecho and desfecho["resultado"] == "efetivada":
+                        return self.reservas.get(desfecho["reserva_id"])
+                    return None
+                hold = self.holds.pop(tx_id)
+                # Os assentos já estão retidos em ocupados[]: basta criar a
+                # reserva (o registro que o motorista enxerga por trecho).
+                reserva = {
+                    "id": _novo_id("res"),
+                    "tx": tx_id,
+                    "coordenador": hold["coordenador"],
+                    "passageiro": hold["passageiro"],
+                    "status": "confirmada",
+                    "criada_em": _agora(),
+                    "data": hold["etapas"][0]["data"],
+                    "etapas": hold["etapas"],
+                    "preco_total": round(sum(p["preco"] for p in hold["etapas"]), 2),
+                }
+                self.reservas[reserva["id"]] = reserva
+                self.desfechos[tx_id] = {
+                    "resultado": "efetivada",
+                    "reserva_id": reserva["id"],
+                    "etapas": hold["etapas"],
+                }
+        self._salvar()
+        return reserva
+
+    def abortar_hold(self, tx_id, motivo: str = "abortada") -> bool:
+        """Fase 2 do 2PC (ABORT) e expiração de lease: devolve os assentos.
+
+        Idempotente: abortar o que não existe (ou já foi abortado) é um
+        sucesso silencioso. Abortar o que já foi EFETIVADO não desfaz a
+        reserva (isso é cancelamento, outra operação) e devolve False.
+        """
+        with self.trava_global:
+            desfecho = self.desfechos.get(tx_id)
+            if desfecho is not None:
+                return desfecho["resultado"] != "efetivada"
+            hold = self.holds.get(tx_id)
+        if hold is None:
+            # Desconhecida: registra o desfecho para que um PREPARE atrasado
+            # desta transação seja recusado (presume abort).
+            with self.trava_global:
+                self.desfechos.setdefault(tx_id, {"resultado": "abortada", "motivo": motivo})
+            return True
+
+        ids = sorted({d[0] for d in hold["demanda"]})
+        with self._travar_caronas(ids):
+            with self.trava_global:
+                hold = self.holds.pop(tx_id, None)
+                if hold is None:
+                    desfecho = self.desfechos.get(tx_id)
+                    return not (desfecho and desfecho["resultado"] == "efetivada")
+                caronas = {i: self.caronas[i] for i in ids}
+                self.desfechos[tx_id] = {"resultado": "abortada", "motivo": motivo}
+            for cid, k, qtd in hold["demanda"]:
+                caronas[cid]["ocupados"][k] -= qtd
+        self._salvar()
+        return True
+
+    def holds_vencidos(self) -> list[dict]:
+        """Holds cujo lease expirou (candidatos a resolução pelo varredor)."""
+        agora = time.time()
+        with self.trava_global:
+            return [dict(h) for h in self.holds.values() if h["expira_em"] <= agora]
+
+    def estender_hold(self, tx_id, segundos: float) -> None:
+        """Prorroga o lease (usado quando o coordenador está inalcançável e
+        ainda não se esgotou a carência de presunção de aborto)."""
+        with self.trava_global:
+            hold = self.holds.get(tx_id)
+            if hold is not None:
+                hold["expira_em"] = time.time() + segundos
+
+    def cancelar_reserva_tx(self, tx_id) -> dict:
+        """Cancela (pós-commit) a reserva local criada pela transação tx_id.
+
+        Usado pelo cancelamento distribuído de itinerário e pela compensação
+        da janela rara em que um participante presumiu aborto após commit em
+        outros. Idempotente.
+        """
+        with self.trava_global:
+            reserva = next(
+                (r for r in self.reservas.values() if r.get("tx") == tx_id), None)
+        if reserva is None:
+            # Nada efetivado aqui: garante ao menos o aborto do hold, se houver.
+            self.abortar_hold(tx_id, motivo="cancelamento")
+            return {"tx": tx_id, "status": "inexistente"}
+        if reserva["status"] == "confirmada":
+            self._desfazer_reserva(reserva, novo_status="cancelada")
+            self._salvar()
+        return {"tx": tx_id, "status": reserva["status"]}
+
+    def registrar_itinerario(self, registro: dict) -> None:
+        """Grava o registro de itinerário do PASSAGEIRO (lado coordenador).
+
+        Este registro é a visão do passageiro (minhas_reservas) e carrega os
+        ids globais ("empresa:carona"); a contabilidade de assentos mora nas
+        reservas dos participantes, nunca aqui — por isso os ids globais não
+        colidem com os locais em minhas_caronas.
+        """
+        with self.trava_global:
+            self.reservas[registro["id"]] = registro
+        self._salvar()
+
+    def marcar_itinerario(self, reserva_id: str, novo_status: str) -> None:
+        with self.trava_global:
+            registro = self.reservas.get(reserva_id)
+            if registro is not None and registro["status"] == "confirmada":
+                registro["status"] = novo_status
+        self._salvar()
+
+    # ------------------------------------------------------------------
     # Consulta para a busca de itinerários
     # ------------------------------------------------------------------
     def snapshot_caronas(self, data: str) -> list[dict]:
@@ -466,6 +732,12 @@ class Estado:
                             "usuarios": self.usuarios,
                             "caronas": self.caronas,
                             "reservas": self.reservas,
+                            # Problema 2: holds e desfechos sobrevivem a
+                            # reinícios — um participante que caiu no meio de
+                            # um 2PC religa com os assentos ainda retidos e
+                            # resolve o hold consultando o coordenador.
+                            "holds": self.holds,
+                            "desfechos": self.desfechos,
                         },
                         ensure_ascii=False,
                         indent=2,
@@ -485,4 +757,6 @@ class Estado:
         self.usuarios = dados.get("usuarios", {})
         self.caronas = dados.get("caronas", {})
         self.reservas = dados.get("reservas", {})
+        self.holds = dados.get("holds", {})
+        self.desfechos = dados.get("desfechos", {})
         self.travas_caronas = {cid: threading.Lock() for cid in self.caronas}

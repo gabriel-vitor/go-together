@@ -27,7 +27,18 @@ def buscar(conexao: Conexao, cache: dict) -> None:
     origem = input("Cidade de origem: ").strip()
     destino = input("Cidade de destino: ").strip()
     data = input("Data (AAAA-MM-DD): ").strip()
-    itinerarios = conexao.pedir("buscar_itinerarios", origem=origem, destino=destino, data=data)
+    resposta = conexao.pedir("buscar_itinerarios", origem=origem, destino=destino, data=data)
+    # Problema 2: a busca é distribuída e a resposta traz também as empresas
+    # que estavam fora do ar (resultado parcial). Aceita o formato antigo
+    # (lista pura) por compatibilidade.
+    if isinstance(resposta, dict):
+        itinerarios = resposta.get("itinerarios", [])
+        indisponiveis = resposta.get("empresas_indisponiveis", [])
+        if indisponiveis:
+            print(f"\n[aviso] empresas sem resposta (resultado parcial): "
+                  f"{', '.join(indisponiveis)}")
+    else:
+        itinerarios = resposta
     if not itinerarios:
         print("\nNenhum itinerário encontrado para esses critérios.")
         cache.pop("itinerarios", None)

@@ -1,0 +1,5 @@
+# Dependências do Problema 2 (uso permitido pelo enunciado: frameworks para
+# a API REST). A coordenação distribuída (2PC, exclusão mútua, recuperação)
+# é implementação própria — ver pacote consorcio/.
+flask>=3.0
+requests>=2.31

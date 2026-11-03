@@ -144,30 +144,65 @@ class Servidor:
         if op == "minhas_caronas":
             return estado.minhas_caronas(usuario)
         if op == "cancelar_carona":
-            return estado.cancelar_carona(usuario, msg.get("carona_id"))
+            resultado = estado.cancelar_carona(usuario, msg.get("carona_id"))
+            # Problema 2: avisa (melhor esforço) os coordenadores das
+            # transações afetadas para desfazerem os itinerários inteiros.
+            afetadas = resultado.pop("transacoes_afetadas", [])
+            if afetadas:
+                self.consorcio.notificar_cancelamentos_de_carona(afetadas)
+            return resultado
 
         # ----- operações do passageiro -----
         if op == "buscar_itinerarios":
             origem = _exigir_texto(msg.get("origem"), "origem", 60)
             destino = _exigir_texto(msg.get("destino"), "destino", 60)
-            snapshot = estado.snapshot_caronas(msg.get("data"))
-            return itinerarios.buscar(snapshot, origem, destino)
+            # Busca DISTRIBUÍDA: catálogo local + consulta aos pares
+            # (dispersar-coletar); par caído vira "empresa indisponível".
+            return self.consorcio.buscar_distribuida(
+                origem, destino, msg.get("data"))
         if op == "reservar":
-            return estado.reservar(usuario, msg.get("etapas"))
+            # Reserva via 2PC: o servidor desta empresa coordena a transação
+            # sobre as empresas donas das caronas (inclusive ele próprio).
+            return self.consorcio.reservar_itinerario(usuario, msg.get("etapas"))
         if op == "minhas_reservas":
             return estado.minhas_reservas(usuario)
         if op == "cancelar_reserva":
-            return estado.cancelar_reserva(usuario, msg.get("reserva_id"))
+            return self.consorcio.cancelar_itinerario(usuario, msg.get("reserva_id"))
 
         raise ErroNegocio(f"operação desconhecida: '{op}'")
 
 
 def principal() -> None:
+    empresa = os.environ.get("EMPRESA", "vaijunto")
     host = os.environ.get("VAIJUNTO_HOST_BIND", "0.0.0.0")
     porta = int(os.environ.get("VAIJUNTO_PORTA", "5000"))
-    caminho = os.environ.get("VAIJUNTO_DADOS", os.path.join("dados", "estado.json"))
+    porta_rest = int(os.environ.get("VAIJUNTO_PORTA_REST", "8000"))
+    caminho = os.environ.get(
+        "VAIJUNTO_DADOS", os.path.join("dados", f"estado-{empresa}.json"))
+    caminho_wal = os.environ.get(
+        "VAIJUNTO_WAL", os.path.join("dados", f"wal-{empresa}.jsonl"))
+
+    servidor = Servidor(host, porta, caminho)
+
+    # Camada do consórcio (Problema 2): coordenação 2PC + API REST entre
+    # servidores. Sobe em thread própria; a queda de um PAR nunca afeta o
+    # atendimento local (timeouts em toda chamada remota).
+    from consorcio.nucleo import Consorcio, mapa_de_pares_do_ambiente
+    from consorcio.rest_api import criar_api
+
+    servidor.consorcio = Consorcio(
+        empresa, servidor.estado, mapa_de_pares_do_ambiente(), caminho_wal)
+    api = criar_api(servidor.consorcio)
+    threading.Thread(
+        target=lambda: api.run(host=host, port=porta_rest, threaded=True,
+                               use_reloader=False),
+        daemon=True,
+    ).start()
+    print(f"[servidor] empresa '{empresa}' | TCP {porta} | REST {porta_rest} | "
+          f"pares: {sorted(servidor.consorcio.pares.mapa) or 'nenhum'}")
+
     try:
-        Servidor(host, porta, caminho).iniciar()
+        servidor.iniciar()
     except KeyboardInterrupt:
         print("\n[servidor] encerrado pelo operador")
         sys.exit(0)

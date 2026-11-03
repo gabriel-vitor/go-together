@@ -1,52 +1,85 @@
-# Orquestração local do VAIJUNTO.
+# Orquestração do consórcio VAIJUNTO (Problema 2).
 #
-# Serviços:
-#   servidor    - sobe por padrão (docker compose up servidor)
-#   motorista   - cliente interativo   (docker compose run --rm motorista)
-#   passageiro  - cliente interativo   (docker compose run --rm passageiro)
-#   teste       - teste de concorrência (docker compose run --rm teste)
+# Três empresas, cada uma em seu contêiner isolado, com armazenamento
+# próprio (volumes separados) e API REST entre si:
+#   vaijunto  TCP 5000 / REST 8000
+#   expresso  TCP 5001 / REST 8001
+#   rotasul   TCP 5002 / REST 8002
 #
-# Na MESMA máquina, os clientes alcançam o servidor pelo nome do serviço
-# ("servidor"), resolvido pelo DNS interno da rede do Compose.
+# Na MESMA máquina, os servidores se enxergam pelo DNS interno do Compose
+# (PARES aponta para os nomes dos serviços). Em MÁQUINAS DISTINTAS
+# (laboratório), cada máquina sobe UMA empresa e PARES aponta para os IPs
+# dos hosts das outras, usando as portas publicadas, por exemplo:
+#   EMPRESA=expresso PARES="vaijunto=http://10.0.0.41:8000,rotasul=http://10.0.0.43:8002" \
+#     docker compose up expresso
 #
-# Em MÁQUINAS DISTINTAS (cenário do laboratório): o servidor publica a porta
-# 5000 no host ("ports"), ficando acessível pelo IP da máquina na rede local.
-# Nos clientes das outras máquinas, aponte VAIJUNTO_HOST para esse IP:
-#   VAIJUNTO_HOST=10.0.0.42 docker compose run --rm passageiro
+# Para simular a queda de um servidor: docker compose stop expresso
+# (e depois docker compose start expresso para observar a recuperação).
+
+x-base: &base
+  build: .
+  restart: unless-stopped
+  environment: &base-env
+    VAIJUNTO_LEASE: "${VAIJUNTO_LEASE:-30}"
 
 services:
-  servidor:
-    build: .
-    ports:
-      - "5000:5000"          # publica no host -> alcançável por outras máquinas
-    volumes:
-      - ./dados:/app/dados   # persiste o estado (JSON) fora do contêiner
-    restart: unless-stopped
+  vaijunto:
+    <<: *base
+    ports: ["5000:5000", "8000:8000"]
+    volumes: ["./dados/vaijunto:/app/dados"]
+    environment:
+      <<: *base-env
+      EMPRESA: vaijunto
+      PARES: "${PARES_VAIJUNTO:-expresso=http://expresso:8000,rotasul=http://rotasul:8000}"
 
+  expresso:
+    <<: *base
+    ports: ["5001:5000", "8001:8000"]
+    volumes: ["./dados/expresso:/app/dados"]
+    environment:
+      <<: *base-env
+      EMPRESA: expresso
+      PARES: "${PARES_EXPRESSO:-vaijunto=http://vaijunto:8000,rotasul=http://rotasul:8000}"
+
+  rotasul:
+    <<: *base
+    ports: ["5002:5000", "8002:8000"]
+    volumes: ["./dados/rotasul:/app/dados"]
+    environment:
+      <<: *base-env
+      EMPRESA: rotasul
+      PARES: "${PARES_ROTASUL:-vaijunto=http://vaijunto:8000,expresso=http://expresso:8000}"
+
+  # Clientes interativos: escolha a empresa via VAIJUNTO_HOST
+  # (ex.: docker compose run --rm -e VAIJUNTO_HOST=expresso passageiro)
   motorista:
     build: .
     command: python -m cliente.motorista
     environment:
-      VAIJUNTO_HOST: ${VAIJUNTO_HOST:-servidor}
-      VAIJUNTO_PORTA: "5000"
-    stdin_open: true          # cliente interativo de terminal
-    tty: true
-    profiles: ["clientes"]    # não sobe junto com "up"; use docker compose run
-
-  passageiro:
-    build: .
-    command: python -m cliente.passageiro
-    environment:
-      VAIJUNTO_HOST: ${VAIJUNTO_HOST:-servidor}
+      VAIJUNTO_HOST: ${VAIJUNTO_HOST:-vaijunto}
       VAIJUNTO_PORTA: "5000"
     stdin_open: true
     tty: true
     profiles: ["clientes"]
 
+  passageiro:
+    build: .
+    command: python -m cliente.passageiro
+    environment:
+      VAIJUNTO_HOST: ${VAIJUNTO_HOST:-vaijunto}
+      VAIJUNTO_PORTA: "5000"
+    stdin_open: true
+    tty: true
+    profiles: ["clientes"]
+
+  # Simulador de passageiros (carga autônoma sobre as 3 empresas)
+  simulador:
+    build: .
+    command: python -m simulador.simulador --tcp vaijunto:5000 expresso:5000 rotasul:5000
+    profiles: ["carga"]
+
+  # Teste do Problema 1 (continua válido contra uma empresa isolada)
   teste:
     build: .
-    command: python -m testes.teste_concorrencia
-    environment:
-      VAIJUNTO_HOST: ${VAIJUNTO_HOST:-servidor}
-      VAIJUNTO_PORTA: "5000"
+    command: python -m testes.teste_concorrencia vaijunto 5000
     profiles: ["teste"]

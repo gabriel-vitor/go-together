@@ -50,6 +50,7 @@ clientes) acrescido de uma camada de consórcio:
 | [simulador/simulador.py](simulador/simulador.py) | Simulador de passageiros: carga autônoma de buscas/reservas pelas 3 empresas |
 | [testes/teste_consorcio.py](testes/teste_consorcio.py) | Teste do consórcio: atomicidade, exclusão mútua e deadlock entre servidores + **injeção de falhas** |
 | [testes/teste_concorrencia.py](testes/teste_concorrencia.py) | Teste do Problema 1 (segue válido contra uma empresa isolada) |
+| [docs/TUTORIAL.md](docs/TUTORIAL.md) | **Tutorial passo a passo**: execução, demonstração fim a fim, laboratório e solução de problemas |
 | [docs/PROTOCOLO.md](docs/PROTOCOLO.md) | Protocolo TCP cliente↔servidor (Problema 1, ainda em uso) |
 | [docs/API-REST.md](docs/API-REST.md) | **Especificação da API REST** do consórcio, com diagrama de sequência do 2PC |
 

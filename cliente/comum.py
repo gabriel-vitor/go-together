@@ -16,6 +16,17 @@ class ErroServidor(Exception):
     """Resposta {"status": "erro"} vinda do servidor."""
 
 
+def entrada(rotulo: str = "") -> str:
+    """input() tolerante a bytes inválidos vindos do terminal.
+
+    Em terminais Windows (e através do TTY do Docker), um acento ou tecla
+    morta pode chegar como byte que não é UTF-8 válido; o Python o representa
+    com um substituto (surrogate) que explode na hora de serializar o JSON.
+    Aqui o substituto vira '?' em vez de derrubar o cliente.
+    """
+    return input(rotulo).encode("utf-8", "replace").decode("utf-8")
+
+
 class Conexao:
     """Conexão persistente de um cliente com o servidor VAIJUNTO."""
 
@@ -62,13 +73,13 @@ def autenticar(conexao: Conexao) -> str:
         print("1. Entrar")
         print("2. Registrar novo usuário")
         print("0. Sair")
-        opcao = input("> ").strip()
+        opcao = entrada("> ").strip()
         if opcao == "0":
             sys.exit(0)
         if opcao not in ("1", "2"):
             continue
-        usuario = input("Usuário: ").strip()
-        senha = input("Senha: ").strip()
+        usuario = entrada("Usuário: ").strip()
+        senha = entrada("Senha: ").strip()
         try:
             if opcao == "2":
                 conexao.pedir("registrar", usuario=usuario, senha=senha)
@@ -83,6 +94,6 @@ def autenticar(conexao: Conexao) -> str:
 def ler_inteiro(rotulo: str) -> int:
     while True:
         try:
-            return int(input(rotulo).strip())
+            return int(entrada(rotulo).strip())
         except ValueError:
             print("Digite um número inteiro.")

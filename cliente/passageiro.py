@@ -8,7 +8,7 @@ reserva atômica de um itinerário, e consultar ou cancelar suas reservas.
 
 import sys
 
-from cliente.comum import Conexao, ErroServidor, autenticar, endereco_servidor
+from cliente.comum import Conexao, ErroServidor, autenticar, endereco_servidor, entrada
 
 
 def _mostrar_itinerarios(itinerarios: list[dict]) -> None:
@@ -24,9 +24,9 @@ def _mostrar_itinerarios(itinerarios: list[dict]) -> None:
 
 def buscar(conexao: Conexao, cache: dict) -> None:
     print("\n--- Buscar itinerários ---")
-    origem = input("Cidade de origem: ").strip()
-    destino = input("Cidade de destino: ").strip()
-    data = input("Data (AAAA-MM-DD): ").strip()
+    origem = entrada("Cidade de origem: ").strip()
+    destino = entrada("Cidade de destino: ").strip()
+    data = entrada("Data (AAAA-MM-DD): ").strip()
     resposta = conexao.pedir("buscar_itinerarios", origem=origem, destino=destino, data=data)
     # Problema 2: a busca é distribuída e a resposta traz também as empresas
     # que estavam fora do ar (resultado parcial). Aceita o formato antigo
@@ -56,7 +56,7 @@ def reservar(conexao: Conexao, cache: dict) -> None:
         print("Busque itinerários primeiro.")
         return
     _mostrar_itinerarios(itinerarios)
-    escolha = input("\nNúmero do itinerário a reservar (0 para voltar): ").strip()
+    escolha = entrada("\nNúmero do itinerário a reservar (0 para voltar): ").strip()
     if not escolha.isdigit() or not (1 <= int(escolha) <= len(itinerarios)):
         return
     itinerario = itinerarios[int(escolha) - 1]
@@ -84,7 +84,7 @@ def minhas_reservas(conexao: Conexao) -> None:
 
 
 def cancelar(conexao: Conexao) -> None:
-    reserva_id = input("Id da reserva a cancelar: ").strip()
+    reserva_id = entrada("Id da reserva a cancelar: ").strip()
     resultado = conexao.pedir("cancelar_reserva", reserva_id=reserva_id)
     print(f"Reserva {resultado['reserva_id']} cancelada; assentos liberados.")
 
@@ -108,7 +108,7 @@ def principal() -> None:
             print("3. Minhas reservas")
             print("4. Cancelar reserva")
             print("0. Sair")
-            opcao = input("> ").strip()
+            opcao = entrada("> ").strip()
             if opcao == "0":
                 break
             try:

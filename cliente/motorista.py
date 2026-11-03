@@ -8,18 +8,18 @@ em cada trecho, e cancelar uma carona.
 
 import sys
 
-from cliente.comum import Conexao, ErroServidor, autenticar, endereco_servidor, ler_inteiro
+from cliente.comum import Conexao, ErroServidor, autenticar, endereco_servidor, entrada, ler_inteiro
 
 
 def publicar(conexao: Conexao) -> None:
     print("\n--- Publicar carona ---")
-    rota_texto = input("Rota (cidades separadas por vírgula, na ordem do percurso):\n> ")
+    rota_texto = entrada("Rota (cidades separadas por vírgula, na ordem do percurso):\n> ")
     rota = [c.strip() for c in rota_texto.split(",") if c.strip()]
     if len(rota) < 2:
         print("[erro] informe pelo menos duas cidades")
         return
-    data = input("Data da partida (AAAA-MM-DD): ").strip()
-    hora = input("Hora da partida (HH:MM): ").strip()
+    data = entrada("Data da partida (AAAA-MM-DD): ").strip()
+    hora = entrada("Hora da partida (HH:MM): ").strip()
     assentos = ler_inteiro("Assentos livres no veículo: ")
 
     # Preço por trecho: um valor único aplicado a todos, ou uma lista.
@@ -27,7 +27,7 @@ def publicar(conexao: Conexao) -> None:
     print(f"A rota tem {n_trechos} trecho(s):")
     for k in range(n_trechos):
         print(f"  {k + 1}. {rota[k]} -> {rota[k + 1]}")
-    precos_texto = input(
+    precos_texto = entrada(
         f"Preço por trecho ({n_trechos} valores separados por vírgula, ou 1 valor para todos): ")
     try:
         valores = [float(v.strip().replace(",", ".")) for v in precos_texto.split(",") if v.strip()] \
@@ -59,9 +59,9 @@ def listar(conexao: Conexao) -> None:
 
 
 def cancelar(conexao: Conexao) -> None:
-    carona_id = input("Id da carona a cancelar: ").strip()
+    carona_id = entrada("Id da carona a cancelar: ").strip()
     print("As reservas de passageiros nesta carona serão canceladas por inteiro.")
-    if input("Confirmar cancelamento? (s/N): ").strip().lower() != "s":
+    if entrada("Confirmar cancelamento? (s/N): ").strip().lower() != "s":
         return
     resultado = conexao.pedir("cancelar_carona", carona_id=carona_id)
     print(f"Carona cancelada ({resultado['reservas_canceladas']} reserva(s) desfeita(s)).")
@@ -85,7 +85,7 @@ def principal() -> None:
             print("2. Minhas caronas (passageiros por trecho)")
             print("3. Cancelar carona")
             print("0. Sair")
-            opcao = input("> ").strip()
+            opcao = entrada("> ").strip()
             if opcao == "0":
                 break
             acao = acoes.get(opcao)
